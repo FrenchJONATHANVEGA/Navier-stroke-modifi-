@@ -1,0 +1,97 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+
+# Paramètres physiques
+R = 1.0      # constante des gaz parfaits
+mu = 0.1     # viscosité dynamique
+D_chi = 0.05 # coefficient de diffusion pour chi
+A = 0.5      # constante de pression de collision
+alpha = 1.5  # exposant pour Pi(chi)
+
+# Domaine spatial
+r_min, r_max = 0.1, 10
+nr = 200
+r = np.linspace(r_min, r_max, nr)
+dr = r[1] - r[0]
+
+# Temps de simulation
+t_final = 2.0
+nt = 200
+times = np.linspace(0, t_final, nt)
+
+# Conditions initiales
+rho0 = 1.0 + 0.2 * np.exp(-((r - 5.0) ** 2) / 0.5)  # Bosse de densité
+vr0 = np.zeros_like(r)                             # Pas de vitesse initiale
+T0 = np.ones_like(r)                               # Température constante
+chi0 = 0.1 * rho0**2                                # Estimation initiale de chi
+
+# Emballage et déballage de l'état
+def pack_state(rho, vr, chi):
+    return np.concatenate([rho, vr, chi])
+
+def unpack_state(y):
+    N = len(y) // 3
+    return y[:N], y[N:2*N], y[2*N:]
+
+# Pression de collision
+def Pi(chi):
+    return A * chi**alpha
+
+# Fonction du système différentiel
+def rhs(t, y):
+    rho, vr, chi = unpack_state(y)
+
+    # Équation d'état
+    p = rho * R * T0
+    pi_chi = Pi(chi)
+
+    # Dérivées spatiales
+    d_rho = np.gradient(rho, dr)
+    d_vr = np.gradient(vr, dr)
+    d_p = np.gradient(p + pi_chi, dr)
+    d2_vr = np.gradient(np.gradient(vr, dr), dr)
+    d2_chi = np.gradient(np.gradient(chi, dr), dr)
+
+    # Équation de continuité
+    d_rho_dt = -1 / r**2 * np.gradient(r**2 * rho * vr, dr)
+
+    # Quantité de mouvement radiale
+    term_visc = mu * (d2_vr + 2 / r * d_vr - 2 * vr / r**2)
+    d_vr_dt = (-d_p / rho) + term_visc / rho - vr * d_vr
+
+    # Évolution de chi (diffusion + advection + source)
+    source_chi = 0.1 * rho**2
+    d_chi_dt = -vr * np.gradient(chi, dr) + D_chi * (1 / r**2) * np.gradient(r**2 * np.gradient(chi, dr), dr) + source_chi
+
+    return pack_state(d_rho_dt, d_vr_dt, d_chi_dt)
+
+# Intégration temporelle
+y0 = pack_state(rho0, vr0, chi0)
+sol = solve_ivp(rhs, [0, t_final], y0, t_eval=times, method='RK45')
+
+# Résultats à t = t_final
+rho_final, vr_final, chi_final = unpack_state(sol.y[:, -1])
+
+# Visualisation
+fig, axs = plt.subplots(3, 1, figsize=(8, 10), sharex=True)
+
+axs[0].plot(r, rho0, label='t = 0')
+axs[0].plot(r, rho_final, label=f't = {t_final}')
+axs[0].set_ylabel('Densité $\\rho(r)$')
+axs[0].legend()
+axs[0].grid(True)
+
+axs[1].plot(r, vr_final)
+axs[1].set_ylabel('Vitesse radiale $v_r(r)$')
+axs[1].grid(True)
+
+axs[2].plot(r, chi0, label='t = 0')
+axs[2].plot(r, chi_final, label=f't = {t_final}')
+axs[2].set_ylabel('Densité de collision $\\chi(r)$')
+axs[2].set_xlabel('Rayon $r$')
+axs[2].legend()
+axs[2].grid(True)
+
+plt.tight_layout()
+plt.show()
